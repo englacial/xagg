@@ -1,0 +1,23 @@
+name: xagg
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - cython
+  - flake8
+  - numpy
+  - pandas
+  - xarray
+  - healpy
+  - xdggs
+  - h5coro
+  - pyarrow
+  - geopandas
+  #- vaex
+  - notebook
+  - pytest
+  - pytest-cov
+  - pip
+  - pip:
+    - mortie
