@@ -52,6 +52,7 @@ docker run --rm --platform linux/arm64 \
             "pandas==2.2.3" fastparquet cramjam \
             healpy astropy \
             earthaccess shapely \
+            "pydantic-zarr>=0.9.1" "zarr>=3.1.5" "obstore>=0.8.2" \
             -c /tmp/constraints.txt \
             -t /out/python \
             --no-cache-dir
@@ -106,11 +107,6 @@ docker run --rm --platform linux/arm64 \
         echo "Stripping binaries..."
         find /out/python -name "*.so" -exec strip {} \; 2>/dev/null || true
 
-        # Remove Python 3.11 files (we use 3.12)
-        echo "Removing Python 3.11 binaries..."
-        find /out/python -name "*cpython-311*" -delete 2>/dev/null || true
-        find /out/python -name "*cpython_311*" -delete 2>/dev/null || true
-
         # Remove duplicate/stale .so files in .libs directories
         echo "Removing duplicate .libs entries..."
         # Keep only the newest openblas in numpy.libs
@@ -147,7 +143,7 @@ fi
 echo ""
 echo "Creating ${ZIP_NAME}..."
 cd "$OUTPUT_DIR"
-zip -r9q "${SCRIPT_DIR}/${ZIP_NAME}" python
+zip -r9q "${SCRIPT_DIR}/../layers/${ZIP_NAME}" python
 cd "$SCRIPT_DIR"
 
 # Report
@@ -162,7 +158,7 @@ echo "  Arch:     arm64 (Graviton2)"
 echo "  Zipped:   ${ZIPPED_SIZE}"
 echo "  Unzipped: ${UNZIPPED_SIZE}"
 echo ""
-ls -lh "${SCRIPT_DIR}/${ZIP_NAME}"
+ls -lh "${SCRIPT_DIR}/../layers/${ZIP_NAME}"
 
 # Cleanup
 rm -rf "$OUTPUT_DIR"

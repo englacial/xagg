@@ -17,8 +17,10 @@ env/
 venv/
 .venv/
 *.egg-info/
+src/magg.egg-info/
 dist/
 build/
+uv.lock
 
 # IDE
 .vscode/
@@ -46,4 +48,12 @@ logs/
 
 # Environment variables
 .env
-.env.local*.zip
+.env.local
+
+# Deployment artifacts
+deployment/data/results/*.json
+deployment/layers/*.zip
+deployment/aws/layer_build*
+# Archives (except examples)
+*.zip
+*.json
