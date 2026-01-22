@@ -1,0 +1,170 @@
+from pydantic_zarr.experimental.v3 import ArraySpec, BaseAttributes, GroupSpec, NamedConfig
+from typing_extensions import TypedDict
+from zarr import config
+from zarr.abc.store import Store
+
+# Constants
+HEALPIX_BASE_CELLS: int = 12  # Number of base cells in HEALPix tessellation
+COORDS: list[str] = ["cell_ids", "morton"]
+DATA_VARS: list[str] = [
+    "count",
+    "h_min",
+    "h_max",
+    "h_mean",
+    "h_sigma",
+    "h_variance",
+    "h_q25",
+    "h_q50",
+    "h_q75",
+]
+
+
+class ATL06AggregationMembers(TypedDict):
+    cell_ids: ArraySpec
+    morton: ArraySpec
+    count: ArraySpec
+    h_min: ArraySpec
+    h_max: ArraySpec
+    h_mean: ArraySpec
+    h_sigma: ArraySpec
+    h_variance: ArraySpec
+    h_q25: ArraySpec
+    h_q50: ArraySpec
+    h_q75: ArraySpec
+
+
+class ATL06AggregationGroup(GroupSpec):
+    members: ATL06AggregationMembers  # type: ignore[assignment]
+    attributes: BaseAttributes
+
+
+def xdggs_spec(
+    parent_order: int,
+    child_order: int,
+) -> ATL06AggregationGroup:
+    """
+    Create a [pydantic_zarr.experimental.v3.GroupSpec]() for ATL06 aggregation data using HEALPix/Morton indexing.
+
+    Parameters
+    ----------
+    parent_order : int
+        HEALPix order of parent morton cells
+    child_order : int
+        HEALPix order of child morton cells (must be >= parent_order)
+
+    Returns
+    -------
+    GroupSpec
+        Xdggs compatible group spec
+
+    Raises
+    ------
+    ValueError
+        If child_order < parent_order
+    """
+    if child_order < parent_order:
+        raise ValueError(f"child_order ({child_order}) must be >= parent_order ({parent_order})")
+
+    level_diff = child_order - parent_order
+    n_children = 4**level_diff
+    n_pixels = HEALPIX_BASE_CELLS * 4**child_order
+
+    # Base configuration for all arrays
+    base_array_spec = ArraySpec(
+        attributes={},
+        shape=(n_pixels,),
+        dimension_names=("cells",),
+        data_type="float32",
+        chunk_grid=NamedConfig(name="regular", configuration={"chunk_shape": (n_children,)}),
+        chunk_key_encoding=NamedConfig(name="default", configuration={"separator": "/"}),
+        codecs=(NamedConfig(name="bytes", configuration={"endian": "little"}),),
+        storage_transformers=(),
+        fill_value="NaN",
+    )
+
+    # Create member specifications
+    members = {
+        "cell_ids": base_array_spec.with_fill_value(0).with_data_type("uint64"),
+        "morton": base_array_spec.with_fill_value(0).with_data_type("int64"),
+        "count": base_array_spec.with_fill_value(0).with_data_type("int32"),
+    }
+
+    # Add statistical data variables (all float32 with NaN fill)
+    for var in DATA_VARS:
+        if var != "count":  # count already added above with different dtype/fill
+            members[var] = base_array_spec
+
+    dggs_attrs = {
+        "zarr_conventions": [
+            {
+                "schema_url": "https://raw.githubusercontent.com/zarr-conventions/dggs/refs/tags/v1/schema.json",
+                "spec_url": "https://github.com/zarr-conventions/dggs/blob/v1/README.md",
+                "uuid": "7b255807-140c-42ca-97f6-7a1cfecdbc38",
+                "name": "dggs",
+                "description": "Discrete Global Grid Systems convention for zarr",
+            }
+        ],
+        "dggs": {
+            "name": "healpix",
+            "refinement_level": child_order,
+            "indexing_scheme": "nested",
+            "spatial_dimension": "cells",
+            "ellipsoid": {
+                "name": "WGS84",
+                "semimajor_axis": 6378137.0,
+                "inverse_flattening": 298.257223563,
+            },
+            "coordinate": "cell_ids",
+            "compression": "none",
+        },
+    }
+
+    # Create and write group specification
+    return ATL06AggregationGroup(members=members, attributes=dggs_attrs)  # type: ignore[arg-type]
+
+
+def xdggs_zarr_template(
+    store: Store,
+    parent_order: int,
+    child_order: int,
+    n_parent_cells: int | None = None,
+    overwrite: bool = False,
+) -> Store:
+    """
+    Create a Zarr template for ATL06 aggregation data using HEALPix/Morton indexing.
+
+    Overwrites an existing Zarr store if it already exists.
+
+    Parameters
+    ----------
+    store : Store
+        Zarr-compatible store (from zarr.abc.store)
+    parent_order : int
+        HEALPix order of parent morton cells (must be >= parent_order)
+    child_order : int
+        HEALPix order of child morton cells (must be >= parent_order)
+    n_parent_cells: int
+        Number of parent cells containing data
+    overwrite: bool
+        Whether to overwrite an existing array or group at the path. If overwrite is False and an array or group already exists at the path, an exception will be raised. Defaults to False.
+
+    Returns
+    -------
+    Store
+        The same store, with template written to path '{child_order}/'
+    """
+    spec = xdggs_spec(parent_order=parent_order, child_order=child_order)
+    if n_parent_cells:
+        assert n_parent_cells > 0
+        level_diff = child_order - parent_order
+        n_pixels = 4**level_diff * n_parent_cells
+        members = {var: m.with_shape((n_pixels,)) for var, m in spec.members.items()}  # type: ignore[attr-defined]
+        spec = spec.with_members(members)
+
+    with config.set({"async.concurrency": 128}):
+        spec.to_zarr(store, str(child_order), overwrite=overwrite)
+
+    return store
+
+
+__all__ = ["DATA_VARS", "COORDS", "ATL06AggregationGroup", "xdggs_zarr_template", "xdggs_spec"]
